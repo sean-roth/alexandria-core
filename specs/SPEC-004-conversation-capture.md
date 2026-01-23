@@ -6,28 +6,27 @@
 **Captain:** Sean  
 **Date:** January 23, 2026  
 **Status:** Ready for Implementation  
-**Depends on:** SPEC-002 (complete), SPEC-003 (complete)
+**Depends on:** SPEC-002 (complete), SPEC-003 (patterns referenced)
 
 ---
 
 ## Context
 
-The library can now store and search books. But knowledge doesn't just come from books - it comes from conversations. Every discussion with Claude, every decision made, every problem solved represents knowledge that should compound.
+We can now embed text and ingest books. The final piece: capturing conversations so the library remembers what we've discussed. This is what makes context compound across sessions.
 
-This spec adds the ability to capture conversations, make them searchable, and optionally import historical chat exports.
+When Sean asks "What did we decide about the embedding architecture?" six months from now, the system should find that conversation.
 
 ---
 
 ## This Spec's Goal
 
 Build a system that:
-1. Stores conversation messages with metadata
-2. Groups messages into sessions
-3. Generates session summaries (for quick reference)
-4. Embeds conversations for semantic search
-5. Can import Claude.ai chat exports
-
-After this: *"What did we decide about the embedding architecture?"* returns the actual conversation where we made that decision.
+1. Stores conversations in `memory.conversations`
+2. Embeds conversation content for semantic search
+3. Groups messages into sessions
+4. Generates session summaries
+5. Provides CLI for manual capture and search
+6. (Optional) Imports Claude.ai chat exports
 
 ---
 
@@ -36,43 +35,45 @@ After this: *"What did we decide about the embedding architecture?"* returns the
 ```
 Conversation Input
     │
-    ├── Manual capture (paste into CLI)
-    ├── Import from Claude.ai export (JSON)
-    └── Future: Direct API integration
-    │
     ▼
 ┌─────────────────┐
-│  Parse & Store  │  (memory.conversations + memory.sessions)
+│ Store Messages  │  (memory.conversations)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│    Embedding    │  (Ollama nomic-embed-text)
+│ Embed Content   │  (memory.embeddings, source_type='conversation')
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  Semantic Index │  (memory.embeddings)
+│ Session Summary │  (memory.sessions - AI-generated)
 └─────────────────┘
 ```
 
 ---
 
-## Learned from Previous Specs
+## Lessons from SPEC-003 Implementation
 
-Per Engineer's feedback from SPEC-003:
+Engineer identified patterns to follow:
 
-1. **Vector formatting**: All pgvector inserts will use explicit string formatting:
+1. **Vector formatting**: Format embeddings as pgvector string literals
    ```python
    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
    ```
 
-2. **ivfflat.probes**: All search queries will set probes before querying:
+2. **ivfflat.probes**: Set before search queries
    ```python
    cursor.execute("SET ivfflat.probes = 100")
    ```
 
-3. **Text preprocessing**: Conversation text will be cleaned before embedding (collapse excessive whitespace, normalize unicode).
+3. **Text preprocessing**: Clean text before embedding
+   ```python
+   text = re.sub(r'\.{3,}', '...', text)  # Collapse consecutive dots
+   text = re.sub(r'\s+', ' ', text)        # Normalize whitespace
+   ```
+
+Apply these patterns throughout this spec.
 
 ---
 
@@ -83,7 +84,6 @@ Create `/opt/alexandria/src/conversations.py`:
 ```python
 import os
 import re
-import json
 import uuid
 import psycopg2
 from psycopg2.extras import Json
@@ -97,10 +97,11 @@ from embeddings import EmbeddingService
 
 class ConversationService:
     """
-    Manages conversation capture, storage, and search.
+    Manages conversation storage, embedding, and retrieval.
     
-    Stores in memory.conversations and memory.sessions.
-    Embeds for semantic search via memory.embeddings.
+    Conversations are stored as individual messages grouped by session.
+    Each message is embedded for semantic search.
+    Sessions can have AI-generated summaries.
     """
     
     def __init__(self):
@@ -113,20 +114,18 @@ class ConversationService:
             "password": os.getenv("POSTGRES_PASSWORD")
         }
     
-    def _clean_text(self, text: str) -> str:
-        """Clean text for embedding (preserve original for storage)."""
-        # Normalize unicode
-        text = text.encode('utf-8', errors='ignore').decode('utf-8')
-        # Collapse excessive whitespace
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = re.sub(r' {2,}', ' ', text)
-        # Collapse repeated punctuation (learned from SPEC-003)
+    def _clean_text_for_embedding(self, text: str) -> str:
+        """Clean text before embedding to avoid Ollama issues."""
+        # Collapse runs of 3+ dots to ellipsis
         text = re.sub(r'\.{3,}', '...', text)
-        text = re.sub(r'-{3,}', '---', text)
+        # Collapse runs of dots with spaces
+        text = re.sub(r'(\.\s*){3,}', '... ', text)
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text)
         return text.strip()
     
-    def _format_vector(self, embedding: list[float]) -> str:
-        """Format embedding for pgvector insertion."""
+    def _format_embedding(self, embedding: list[float]) -> str:
+        """Format embedding as pgvector string literal."""
         return "[" + ",".join(str(x) for x in embedding) + "]"
     
     def create_session(
@@ -156,67 +155,106 @@ class ConversationService:
     
     def add_message(
         self,
-        session_id: str,
-        role: str,
         content: str,
+        role: str,
         participant: str,
+        session_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         embed: bool = True
     ) -> int:
         """
-        Add a message to a session.
+        Add a message to a conversation.
         
         Args:
-            session_id: UUID of the session
-            role: 'user' or 'assistant'
-            content: Message text
+            content: The message text
+            role: 'user', 'assistant', or 'system'
             participant: Who sent this ('sean', 'claude_desktop', 'claude_code', etc.)
+            session_id: Optional session to group messages
             metadata: Optional additional data
-            embed: Whether to create embedding (default True)
+            embed: Whether to create an embedding (default True)
         
-        Returns: message ID
+        Returns: message_id
         """
         conn = psycopg2.connect(**self.db_config)
         cursor = conn.cursor()
         
-        # Store message
+        # Store the message
         cursor.execute("""
             INSERT INTO memory.conversations 
-            (session_id, role, content, participant, metadata)
+            (participant, role, content, session_id, metadata)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id
-        """, (session_id, role, content, participant, Json(metadata or {})))
+        """, (
+            participant,
+            role,
+            content,
+            session_id,
+            Json(metadata or {})
+        ))
         
         message_id = cursor.fetchone()[0]
         
         # Create embedding if requested
         if embed and content.strip():
-            cleaned = self._clean_text(content)
-            if len(cleaned) > 50:  # Only embed substantive messages
-                embedding = self.embedding_service.generate_embedding(cleaned)
-                embedding_str = self._format_vector(embedding)
-                
-                cursor.execute("""
-                    INSERT INTO memory.embeddings
-                    (source_type, source_id, content_preview, embedding, metadata)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    'conversation',
-                    message_id,
-                    cleaned[:500],
-                    embedding_str,
-                    Json({
-                        "session_id": session_id,
-                        "role": role,
-                        "participant": participant,
-                        "model": "nomic-embed-text"
-                    })
-                ))
+            clean_content = self._clean_text_for_embedding(content)
+            embedding = self.embedding_service.generate_embedding(clean_content)
+            embedding_str = self._format_embedding(embedding)
+            
+            preview = content[:500] if len(content) > 500 else content
+            
+            cursor.execute("""
+                INSERT INTO memory.embeddings
+                (source_type, source_id, content_preview, embedding, metadata)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                'conversation',
+                message_id,
+                preview,
+                embedding_str,
+                Json({
+                    "participant": participant,
+                    "role": role,
+                    "session_id": session_id,
+                    "model": "nomic-embed-text"
+                })
+            ))
         
         conn.commit()
         conn.close()
         
         return message_id
+    
+    def add_exchange(
+        self,
+        user_message: str,
+        assistant_message: str,
+        user_participant: str = "sean",
+        assistant_participant: str = "claude",
+        session_id: Optional[str] = None,
+        metadata: Optional[dict] = None
+    ) -> dict:
+        """
+        Add a user-assistant exchange (convenience method).
+        
+        Returns: {"user_id": int, "assistant_id": int}
+        """
+        user_id = self.add_message(
+            content=user_message,
+            role="user",
+            participant=user_participant,
+            session_id=session_id,
+            metadata=metadata
+        )
+        
+        assistant_id = self.add_message(
+            content=assistant_message,
+            role="assistant",
+            participant=assistant_participant,
+            session_id=session_id,
+            metadata=metadata
+        )
+        
+        return {"user_id": user_id, "assistant_id": assistant_id}
     
     def end_session(
         self,
@@ -235,318 +273,273 @@ class ConversationService:
             WHERE id = %s
         """, (summary, session_id))
         
-        # Embed the summary if provided
-        if summary and summary.strip():
-            cleaned = self._clean_text(summary)
-            embedding = self.embedding_service.generate_embedding(cleaned)
-            embedding_str = self._format_vector(embedding)
-            
-            cursor.execute("""
-                INSERT INTO memory.embeddings
-                (source_type, source_id, content_preview, embedding, metadata)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                'session_summary',
-                None,
-                cleaned[:500],
-                embedding_str,
-                Json({
-                    "session_id": session_id,
-                    "model": "nomic-embed-text"
-                })
-            ))
-        
         conn.commit()
         conn.close()
-    
-    def capture_conversation(
-        self,
-        messages: list[dict],
-        participant: str = "claude_desktop",
-        session_metadata: Optional[dict] = None
-    ) -> dict:
-        """
-        Capture a full conversation at once.
-        
-        Args:
-            messages: List of {"role": "user"|"assistant", "content": "..."}
-            participant: The AI participant ('claude_desktop', 'claude_code', etc.)
-            session_metadata: Optional metadata for the session
-        
-        Returns: {"session_id": str, "messages_stored": int, "messages_embedded": int}
-        """
-        session_id = self.create_session(participant, session_metadata)
-        
-        messages_stored = 0
-        messages_embedded = 0
-        
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            
-            if not content.strip():
-                continue
-            
-            # Determine participant based on role
-            msg_participant = "sean" if role == "user" else participant
-            
-            self.add_message(
-                session_id=session_id,
-                role=role,
-                content=content,
-                participant=msg_participant,
-                metadata=msg.get("metadata"),
-                embed=True
-            )
-            messages_stored += 1
-            if len(self._clean_text(content)) > 50:
-                messages_embedded += 1
-        
-        return {
-            "session_id": session_id,
-            "messages_stored": messages_stored,
-            "messages_embedded": messages_embedded
-        }
-    
-    def import_claude_export(self, export_path: str) -> dict:
-        """
-        Import conversations from Claude.ai JSON export.
-        
-        The export format is a JSON array of conversation objects.
-        Each conversation has 'uuid', 'name', 'created_at', 'updated_at',
-        and 'chat_messages' array.
-        
-        Returns: {"conversations_imported": int, "messages_imported": int, "errors": list}
-        """
-        with open(export_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # Handle both single conversation and array of conversations
-        if isinstance(data, dict):
-            conversations = [data]
-        else:
-            conversations = data
-        
-        total_conversations = 0
-        total_messages = 0
-        errors = []
-        
-        for conv in conversations:
-            try:
-                conv_uuid = conv.get('uuid', str(uuid.uuid4()))
-                conv_name = conv.get('name', 'Untitled')
-                created_at = conv.get('created_at')
-                messages = conv.get('chat_messages', [])
-                
-                if not messages:
-                    continue
-                
-                # Create session with original metadata
-                conn = psycopg2.connect(**self.db_config)
-                cursor = conn.cursor()
-                
-                session_id = str(uuid.uuid4())
-                
-                cursor.execute("""
-                    INSERT INTO memory.sessions (id, participant, metadata)
-                    VALUES (%s, %s, %s)
-                """, (
-                    session_id,
-                    'claude_desktop',
-                    Json({
-                        "source": "claude_export",
-                        "original_uuid": conv_uuid,
-                        "conversation_name": conv_name,
-                        "original_created_at": created_at
-                    })
-                ))
-                conn.commit()
-                conn.close()
-                
-                # Add messages
-                for msg in messages:
-                    sender = msg.get('sender', 'human')
-                    role = 'user' if sender == 'human' else 'assistant'
-                    
-                    # Handle different content formats
-                    content = msg.get('text', '')
-                    if not content and 'content' in msg:
-                        content_data = msg['content']
-                        if isinstance(content_data, list):
-                            # Extract text from content blocks
-                            content = ' '.join(
-                                block.get('text', '') 
-                                for block in content_data 
-                                if block.get('type') == 'text'
-                            )
-                        elif isinstance(content_data, str):
-                            content = content_data
-                    
-                    if content.strip():
-                        participant = 'sean' if role == 'user' else 'claude_desktop'
-                        self.add_message(
-                            session_id=session_id,
-                            role=role,
-                            content=content,
-                            participant=participant,
-                            metadata={"original_uuid": msg.get('uuid')},
-                            embed=True
-                        )
-                        total_messages += 1
-                
-                total_conversations += 1
-                print(f"  Imported: {conv_name[:50]}... ({len(messages)} messages)")
-                
-            except Exception as e:
-                errors.append(f"Error importing conversation: {e}")
-        
-        return {
-            "conversations_imported": total_conversations,
-            "messages_imported": total_messages,
-            "errors": errors
-        }
     
     def search_conversations(
         self,
         query: str,
         limit: int = 5,
-        participant: Optional[str] = None
+        participant: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> list[dict]:
         """
-        Semantic search across conversations.
+        Semantic search across conversation history.
         
-        Returns matching messages with session context.
+        Optionally filter by participant or session.
         """
-        query_embedding = self.embedding_service.generate_embedding(query)
-        embedding_str = self._format_vector(query_embedding)
+        clean_query = self._clean_text_for_embedding(query)
+        query_embedding = self.embedding_service.generate_embedding(clean_query)
+        query_embedding_str = self._format_embedding(query_embedding)
         
         conn = psycopg2.connect(**self.db_config)
         cursor = conn.cursor()
         
-        # Set probes for accurate search (learned from SPEC-003)
+        # Set probes for accurate search with ivfflat
         cursor.execute("SET ivfflat.probes = 100")
         
+        # Build query with optional filters
+        where_clauses = ["e.source_type = 'conversation'"]
+        params = [query_embedding_str]
+        
         if participant:
-            cursor.execute("""
-                SELECT 
-                    e.id,
-                    e.source_id,
-                    e.content_preview,
-                    e.embedding <=> %s::vector AS distance,
-                    e.metadata,
-                    c.role,
-                    c.participant,
-                    c.session_id,
-                    s.metadata as session_metadata
-                FROM memory.embeddings e
-                LEFT JOIN memory.conversations c ON e.source_id = c.id AND e.source_type = 'conversation'
-                LEFT JOIN memory.sessions s ON c.session_id = s.id
-                WHERE e.source_type IN ('conversation', 'session_summary')
-                AND (e.metadata->>'participant' = %s OR c.participant = %s)
-                ORDER BY distance
-                LIMIT %s
-            """, (embedding_str, participant, participant, limit))
-        else:
-            cursor.execute("""
-                SELECT 
-                    e.id,
-                    e.source_id,
-                    e.content_preview,
-                    e.embedding <=> %s::vector AS distance,
-                    e.metadata,
-                    c.role,
-                    c.participant,
-                    c.session_id,
-                    s.metadata as session_metadata
-                FROM memory.embeddings e
-                LEFT JOIN memory.conversations c ON e.source_id = c.id AND e.source_type = 'conversation'
-                LEFT JOIN memory.sessions s ON c.session_id = s.id
-                WHERE e.source_type IN ('conversation', 'session_summary')
-                ORDER BY distance
-                LIMIT %s
-            """, (embedding_str, limit))
+            where_clauses.append("e.metadata->>'participant' = %s")
+            params.append(participant)
+        
+        if session_id:
+            where_clauses.append("e.metadata->>'session_id' = %s")
+            params.append(session_id)
+        
+        params.append(limit)
+        
+        cursor.execute(f"""
+            SELECT 
+                e.id,
+                e.source_id,
+                e.content_preview,
+                e.embedding <=> %s::vector AS distance,
+                e.metadata,
+                c.role,
+                c.participant,
+                c.session_id,
+                c.created_at
+            FROM memory.embeddings e
+            JOIN memory.conversations c ON e.source_id = c.id
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY distance
+            LIMIT %s
+        """, params)
         
         results = []
         for row in cursor.fetchall():
-            session_meta = row[8] or {}
             results.append({
                 "embedding_id": row[0],
                 "message_id": row[1],
                 "preview": row[2],
                 "distance": row[3],
-                "embedding_metadata": row[4],
+                "metadata": row[4],
                 "role": row[5],
                 "participant": row[6],
                 "session_id": row[7],
-                "conversation_name": session_meta.get("conversation_name", "Unknown")
+                "created_at": row[8]
             })
         
         conn.close()
         return results
     
-    def list_sessions(self, limit: int = 20) -> list[dict]:
-        """List recent conversation sessions."""
-        conn = psycopg2.connect(**self.db_config)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT 
-                s.id,
-                s.participant,
-                s.started_at,
-                s.ended_at,
-                s.summary,
-                s.metadata,
-                COUNT(c.id) as message_count
-            FROM memory.sessions s
-            LEFT JOIN memory.conversations c ON s.id = c.session_id
-            GROUP BY s.id
-            ORDER BY s.started_at DESC
-            LIMIT %s
-        """, (limit,))
-        
-        sessions = []
-        for row in cursor.fetchall():
-            meta = row[5] or {}
-            sessions.append({
-                "id": row[0],
-                "participant": row[1],
-                "started_at": row[2],
-                "ended_at": row[3],
-                "summary": row[4],
-                "conversation_name": meta.get("conversation_name", ""),
-                "source": meta.get("source", "manual"),
-                "message_count": row[6]
-            })
-        
-        conn.close()
-        return sessions
-    
     def get_session_messages(self, session_id: str) -> list[dict]:
-        """Get all messages in a session."""
+        """Get all messages in a session, ordered by time."""
         conn = psycopg2.connect(**self.db_config)
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, role, content, participant, created_at, metadata
+            SELECT id, participant, role, content, created_at, metadata
             FROM memory.conversations
             WHERE session_id = %s
-            ORDER BY created_at ASC
+            ORDER BY created_at
         """, (session_id,))
         
         messages = []
         for row in cursor.fetchall():
             messages.append({
                 "id": row[0],
-                "role": row[1],
-                "content": row[2],
-                "participant": row[3],
+                "participant": row[1],
+                "role": row[2],
+                "content": row[3],
                 "created_at": row[4],
                 "metadata": row[5]
             })
         
         conn.close()
         return messages
+    
+    def list_sessions(
+        self,
+        participant: Optional[str] = None,
+        limit: int = 20
+    ) -> list[dict]:
+        """List recent sessions."""
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor()
+        
+        if participant:
+            cursor.execute("""
+                SELECT id, participant, started_at, ended_at, summary, metadata
+                FROM memory.sessions
+                WHERE participant = %s
+                ORDER BY started_at DESC
+                LIMIT %s
+            """, (participant, limit))
+        else:
+            cursor.execute("""
+                SELECT id, participant, started_at, ended_at, summary, metadata
+                FROM memory.sessions
+                ORDER BY started_at DESC
+                LIMIT %s
+            """, (limit,))
+        
+        sessions = []
+        for row in cursor.fetchall():
+            sessions.append({
+                "id": row[0],
+                "participant": row[1],
+                "started_at": row[2],
+                "ended_at": row[3],
+                "summary": row[4],
+                "metadata": row[5]
+            })
+        
+        conn.close()
+        return sessions
+    
+    def get_recent_context(
+        self,
+        limit: int = 10,
+        participant: Optional[str] = None
+    ) -> list[dict]:
+        """
+        Get recent conversation messages for context.
+        
+        Useful for providing conversation history to an AI.
+        """
+        conn = psycopg2.connect(**self.db_config)
+        cursor = conn.cursor()
+        
+        if participant:
+            cursor.execute("""
+                SELECT id, participant, role, content, created_at
+                FROM memory.conversations
+                WHERE participant = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (participant, limit))
+        else:
+            cursor.execute("""
+                SELECT id, participant, role, content, created_at
+                FROM memory.conversations
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (limit,))
+        
+        # Reverse to get chronological order
+        messages = []
+        for row in cursor.fetchall():
+            messages.append({
+                "id": row[0],
+                "participant": row[1],
+                "role": row[2],
+                "content": row[3],
+                "created_at": row[4]
+            })
+        
+        conn.close()
+        return list(reversed(messages))
+
+
+class ConversationImporter:
+    """
+    Import conversations from external sources (e.g., Claude.ai exports).
+    """
+    
+    def __init__(self):
+        self.conversation_service = ConversationService()
+    
+    def import_claude_export(self, json_path: str) -> dict:
+        """
+        Import a Claude.ai conversation export.
+        
+        Claude.ai exports are JSON files with conversation data.
+        
+        Returns: {"sessions_created": int, "messages_imported": int}
+        """
+        import json
+        
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        sessions_created = 0
+        messages_imported = 0
+        
+        # Claude.ai export format (may vary - adjust as needed)
+        # Expected: list of conversations, each with messages
+        conversations = data if isinstance(data, list) else data.get('conversations', [data])
+        
+        for conv in conversations:
+            # Create session for this conversation
+            session_id = self.conversation_service.create_session(
+                participant="claude_ai_import",
+                metadata={
+                    "source": "claude.ai",
+                    "import_date": datetime.now().isoformat(),
+                    "original_id": conv.get('uuid', conv.get('id', 'unknown'))
+                }
+            )
+            sessions_created += 1
+            
+            # Import messages
+            messages = conv.get('chat_messages', conv.get('messages', []))
+            
+            for msg in messages:
+                # Handle different export formats
+                role = msg.get('sender', msg.get('role', 'unknown'))
+                if role == 'human':
+                    role = 'user'
+                elif role == 'assistant':
+                    role = 'assistant'
+                
+                content = msg.get('text', msg.get('content', ''))
+                
+                # Handle content that might be a list of blocks
+                if isinstance(content, list):
+                    content = '\n'.join(
+                        block.get('text', str(block)) 
+                        for block in content 
+                        if isinstance(block, dict)
+                    )
+                
+                if content:
+                    self.conversation_service.add_message(
+                        content=content,
+                        role=role,
+                        participant="claude_ai_import",
+                        session_id=session_id,
+                        metadata={
+                            "imported": True,
+                            "original_timestamp": msg.get('created_at', msg.get('timestamp'))
+                        }
+                    )
+                    messages_imported += 1
+            
+            # End the session
+            self.conversation_service.end_session(
+                session_id,
+                summary=f"Imported from Claude.ai ({len(messages)} messages)"
+            )
+        
+        return {
+            "sessions_created": sessions_created,
+            "messages_imported": messages_imported
+        }
 ```
 
 ---
@@ -557,85 +550,90 @@ Create `/opt/alexandria/src/convo_cli.py`:
 
 ```python
 #!/usr/bin/env python3
-"""CLI for conversation capture and search."""
+"""CLI for conversation operations."""
 
 import argparse
 import sys
 import os
-import json
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
 load_dotenv("/opt/alexandria/.env")
 
-from conversations import ConversationService
+from conversations import ConversationService, ConversationImporter
 
 def main():
     parser = argparse.ArgumentParser(description="Alexandria Conversation CLI")
     subparsers = parser.add_subparsers(dest="command")
     
-    # Import command
-    import_parser = subparsers.add_parser("import", help="Import Claude.ai export")
-    import_parser.add_argument("path", help="Path to export JSON file")
+    # Add message
+    add_parser = subparsers.add_parser("add", help="Add a single message")
+    add_parser.add_argument("content", help="Message content")
+    add_parser.add_argument("--role", choices=["user", "assistant", "system"], default="user")
+    add_parser.add_argument("--participant", default="sean")
+    add_parser.add_argument("--session", help="Session ID to add to")
     
-    # Capture command (for manual paste)
-    capture_parser = subparsers.add_parser("capture", help="Capture a conversation from JSON")
-    capture_parser.add_argument("path", help="Path to JSON file with messages")
-    capture_parser.add_argument("--participant", default="claude_desktop", help="AI participant name")
+    # Add exchange (user + assistant pair)
+    exchange_parser = subparsers.add_parser("exchange", help="Add a user-assistant exchange")
+    exchange_parser.add_argument("--user", required=True, help="User message")
+    exchange_parser.add_argument("--assistant", required=True, help="Assistant response")
+    exchange_parser.add_argument("--session", help="Session ID")
     
-    # Search command
+    # Search
     search_parser = subparsers.add_parser("search", help="Search conversations")
     search_parser.add_argument("query", help="Search query")
-    search_parser.add_argument("--limit", type=int, default=5, help="Max results")
+    search_parser.add_argument("--limit", type=int, default=5)
     search_parser.add_argument("--participant", help="Filter by participant")
     
-    # List command
-    list_parser = subparsers.add_parser("list", help="List conversation sessions")
-    list_parser.add_argument("--limit", type=int, default=20, help="Max sessions")
+    # List sessions
+    list_parser = subparsers.add_parser("sessions", help="List sessions")
+    list_parser.add_argument("--participant", help="Filter by participant")
+    list_parser.add_argument("--limit", type=int, default=20)
     
-    # Show command
-    show_parser = subparsers.add_parser("show", help="Show messages in a session")
-    show_parser.add_argument("session_id", help="Session UUID")
+    # Show session
+    show_parser = subparsers.add_parser("show", help="Show session messages")
+    show_parser.add_argument("session_id", help="Session ID to show")
+    
+    # New session
+    new_parser = subparsers.add_parser("new", help="Create new session")
+    new_parser.add_argument("--participant", default="sean")
+    
+    # Import
+    import_parser = subparsers.add_parser("import", help="Import conversations")
+    import_parser.add_argument("file", help="JSON file to import")
+    import_parser.add_argument("--format", choices=["claude"], default="claude", 
+                               help="Import format")
+    
+    # Recent context
+    recent_parser = subparsers.add_parser("recent", help="Show recent messages")
+    recent_parser.add_argument("--limit", type=int, default=10)
+    recent_parser.add_argument("--participant", help="Filter by participant")
     
     args = parser.parse_args()
     service = ConversationService()
     
-    if args.command == "import":
-        if not os.path.exists(args.path):
-            print(f"Error: File not found: {args.path}")
-            sys.exit(1)
-        
-        print(f"Importing from {args.path}...")
-        result = service.import_claude_export(args.path)
-        
-        print(f"\nImport complete:")
-        print(f"  Conversations: {result['conversations_imported']}")
-        print(f"  Messages: {result['messages_imported']}")
-        
-        if result['errors']:
-            print(f"\nErrors ({len(result['errors'])}):")
-            for err in result['errors'][:5]:
-                print(f"  - {err}")
+    if args.command == "add":
+        msg_id = service.add_message(
+            content=args.content,
+            role=args.role,
+            participant=args.participant,
+            session_id=args.session
+        )
+        print(f"Added message {msg_id}")
     
-    elif args.command == "capture":
-        if not os.path.exists(args.path):
-            print(f"Error: File not found: {args.path}")
-            sys.exit(1)
-        
-        with open(args.path, 'r') as f:
-            messages = json.load(f)
-        
-        result = service.capture_conversation(messages, args.participant)
-        
-        print(f"Captured conversation:")
-        print(f"  Session ID: {result['session_id']}")
-        print(f"  Messages stored: {result['messages_stored']}")
-        print(f"  Messages embedded: {result['messages_embedded']}")
+    elif args.command == "exchange":
+        result = service.add_exchange(
+            user_message=args.user,
+            assistant_message=args.assistant,
+            session_id=args.session
+        )
+        print(f"Added exchange: user={result['user_id']}, assistant={result['assistant_id']}")
     
     elif args.command == "search":
         results = service.search_conversations(
-            args.query,
+            query=args.query,
             limit=args.limit,
             participant=args.participant
         )
@@ -645,42 +643,64 @@ def main():
             return
         
         for r in results:
-            role_indicator = "👤" if r['role'] == 'user' else "🤖"
-            conv_name = r['conversation_name'][:30] if r['conversation_name'] else "Unknown"
-            
-            print(f"\n{role_indicator} [{conv_name}] (distance: {r['distance']:.4f})")
-            print(f"   {r['preview'][:200]}...")
-            print(f"   Session: {r['session_id'][:8]}...")
+            timestamp = r['created_at'].strftime('%Y-%m-%d %H:%M') if r['created_at'] else '?'
+            print(f"\n[{r['participant']}/{r['role']}] {timestamp} (distance: {r['distance']:.4f})")
+            print(f"  {r['preview'][:300]}...")
     
-    elif args.command == "list":
-        sessions = service.list_sessions(limit=args.limit)
+    elif args.command == "sessions":
+        sessions = service.list_sessions(
+            participant=args.participant,
+            limit=args.limit
+        )
         
         if not sessions:
-            print("No conversation sessions found.")
+            print("No sessions found.")
             return
         
-        print(f"{'ID':<10} {'Name':<35} {'Msgs':<6} {'Participant':<15} {'Date'}")
-        print("-" * 90)
-        
+        print(f"{'ID':<36}  {'Participant':<20}  {'Started':<16}  {'Summary'}")
+        print("-" * 100)
         for s in sessions:
-            sid = s['id'][:8] + "..."
-            name = s['conversation_name'][:32] + "..." if len(s.get('conversation_name', '')) > 35 else s.get('conversation_name', '-')
-            date = s['started_at'].strftime('%Y-%m-%d') if s['started_at'] else '?'
-            print(f"{sid:<10} {name:<35} {s['message_count']:<6} {s['participant']:<15} {date}")
+            started = s['started_at'].strftime('%Y-%m-%d %H:%M') if s['started_at'] else '?'
+            summary = (s['summary'] or '')[:30]
+            print(f"{s['id']}  {s['participant']:<20}  {started:<16}  {summary}")
     
     elif args.command == "show":
         messages = service.get_session_messages(args.session_id)
         
         if not messages:
-            print("No messages found for this session.")
+            print("No messages found in session.")
             return
         
-        for msg in messages:
-            role_indicator = "👤 Sean:" if msg['role'] == 'user' else f"🤖 {msg['participant']}:"
-            print(f"\n{role_indicator}")
-            print(msg['content'][:500])
-            if len(msg['content']) > 500:
-                print("... [truncated]")
+        for m in messages:
+            timestamp = m['created_at'].strftime('%H:%M:%S') if m['created_at'] else '?'
+            print(f"\n[{timestamp}] {m['participant']} ({m['role']}):")
+            print(f"  {m['content'][:500]}{'...' if len(m['content']) > 500 else ''}")
+    
+    elif args.command == "new":
+        session_id = service.create_session(participant=args.participant)
+        print(f"Created session: {session_id}")
+    
+    elif args.command == "import":
+        importer = ConversationImporter()
+        
+        if args.format == "claude":
+            result = importer.import_claude_export(args.file)
+            print(f"Imported {result['sessions_created']} sessions, {result['messages_imported']} messages")
+    
+    elif args.command == "recent":
+        messages = service.get_recent_context(
+            limit=args.limit,
+            participant=args.participant
+        )
+        
+        if not messages:
+            print("No recent messages.")
+            return
+        
+        for m in messages:
+            timestamp = m['created_at'].strftime('%Y-%m-%d %H:%M') if m['created_at'] else '?'
+            content_preview = m['content'][:100].replace('\n', ' ')
+            print(f"[{timestamp}] {m['participant']}/{m['role']}: {content_preview}...")
     
     else:
         parser.print_help()
@@ -696,99 +716,78 @@ chmod +x /opt/alexandria/src/convo_cli.py
 
 ---
 
-## Requirement 3: Get Claude.ai Export
+## Requirement 3: Validation
 
-Sean can export his Claude.ai conversations:
-
-1. Go to https://claude.ai/settings
-2. Click "Export Data"
-3. Download the JSON export
-4. Transfer to server: `/opt/alexandria/imports/`
-
-```bash
-mkdir -p /opt/alexandria/imports
-# Then SCP the export file there
-```
-
----
-
-## Requirement 4: Validation
-
-### Test 1: Manual Capture
-
-Create a test conversation file `/tmp/test_convo.json`:
-```json
-[
-    {"role": "user", "content": "What's the best way to structure a vector database?"},
-    {"role": "assistant", "content": "For your use case, I'd recommend PostgreSQL with pgvector. It gives you both structured data and semantic search in one system."},
-    {"role": "user", "content": "Should I use OpenAI or local embeddings?"},
-    {"role": "assistant", "content": "Given your values around data sovereignty, local embeddings with Ollama make more sense. The quality difference is minimal for personal knowledge bases."}
-]
-```
+### Test 1: Create Session and Add Messages
 
 ```bash
 cd /opt/alexandria
 source venv/bin/activate
 
-python src/convo_cli.py capture /tmp/test_convo.json --participant claude_designer
+# Create a new session
+python src/convo_cli.py new --participant sean
+# Note the session ID returned
+
+# Add an exchange
+python src/convo_cli.py exchange \
+  --user "What embedding model should we use?" \
+  --assistant "I recommend nomic-embed-text via Ollama for local operation." \
+  --session <session-id>
 ```
 
 ### Test 2: Search Conversations
 
 ```bash
-python src/convo_cli.py search "vector database recommendations"
-python src/convo_cli.py search "embedding model decision"
+# Search for the conversation we just added
+python src/convo_cli.py search "embedding model recommendation"
+
+# Should find the exchange with low distance score
 ```
 
-Should find the test conversation.
-
-### Test 3: List Sessions
+### Test 3: List and Show Sessions
 
 ```bash
-python src/convo_cli.py list
+# List all sessions
+python src/convo_cli.py sessions
+
+# Show messages in a specific session
+python src/convo_cli.py show <session-id>
 ```
 
-Should show the captured session.
-
-### Test 4: Show Session
+### Test 4: Recent Context
 
 ```bash
-python src/convo_cli.py show <session-id-from-list>
+python src/convo_cli.py recent --limit 5
 ```
 
-Should display the conversation messages.
-
-### Test 5: Import Claude Export (if available)
-
-```bash
-python src/convo_cli.py import /opt/alexandria/imports/claude-export.json
-```
-
-### Test 6: Verify in Database
+### Test 5: Database Verification
 
 ```sql
--- Check sessions
-SELECT id, participant, metadata->>'conversation_name' as name,
-       (SELECT COUNT(*) FROM memory.conversations c WHERE c.session_id = s.id) as msgs
-FROM memory.sessions s
-ORDER BY started_at DESC
-LIMIT 5;
+-- Check conversations table
+SELECT id, participant, role, 
+       substring(content, 1, 50) as content_preview,
+       session_id
+FROM memory.conversations
+ORDER BY created_at DESC
+LIMIT 10;
 
--- Check conversation embeddings
+-- Check embeddings were created
 SELECT source_type, COUNT(*) 
 FROM memory.embeddings 
-WHERE source_type IN ('conversation', 'session_summary')
 GROUP BY source_type;
 
--- Sample search
-SET ivfflat.probes = 100;
-SELECT content_preview, embedding <=> (
-    SELECT embedding FROM memory.embeddings WHERE source_type = 'conversation' LIMIT 1
-)::vector as distance
-FROM memory.embeddings
-WHERE source_type = 'conversation'
-ORDER BY distance
-LIMIT 3;
+-- Check sessions
+SELECT id, participant, started_at, summary
+FROM memory.sessions
+ORDER BY started_at DESC;
+```
+
+### Test 6: Import (Optional)
+
+If Sean has a Claude.ai export:
+
+```bash
+python src/convo_cli.py import ~/claude-export.json --format claude
 ```
 
 ---
@@ -797,70 +796,73 @@ LIMIT 3;
 
 - [ ] `/opt/alexandria/src/conversations.py` created
 - [ ] `/opt/alexandria/src/convo_cli.py` created
-- [ ] Test 1 passes (manual capture works)
+- [ ] Test 1 passes (can create sessions and add messages)
 - [ ] Test 2 passes (semantic search finds conversations)
-- [ ] Test 3 passes (list shows sessions)
-- [ ] Test 4 passes (show displays messages)
-- [ ] Test 6 passes (database has correct data)
+- [ ] Test 3 passes (can list and view sessions)
+- [ ] Test 4 passes (recent context works)
+- [ ] Test 5 passes (database has correct data)
 
 ---
 
 ## Notes for Claude Code
 
-### On the Claude Export Format
-The format varies slightly between export versions. The import function handles:
-- `text` field (older format)
-- `content` as string (some versions)
-- `content` as array of blocks (newer format)
+### On the Import Format
+Claude.ai exports vary in structure. The importer handles common formats but may need adjustment. If import fails, check the JSON structure and adapt.
 
-If you encounter a format that doesn't work, document it and adapt.
+### On Embedding Every Message
+The spec embeds every message by default. For very long conversations, this could be slow. The `embed=False` parameter exists if needed, but for typical use, embedding everything is fine.
 
-### On Embedding Decisions
-- Only embed messages > 50 characters (skip "ok", "thanks", etc.)
-- Session summaries get embedded separately (useful for finding whole conversations)
-- Metadata tracks session_id so we can link back to full context
+### On Session Management
+Sessions are optional. Messages can exist without a session_id. Sessions are useful for:
+- Grouping related conversations
+- Adding summaries
+- Filtering searches
 
-### On Performance
-- Large exports (hundreds of conversations) will take time
-- Consider adding progress indicators for imports
-- Each message = one embedding = ~1-2 seconds with Ollama
+### On Vector Formatting
+Apply the SPEC-003 lessons: use string formatting for pgvector, set ivfflat.probes, clean text before embedding.
 
 ---
 
 ## What This Enables
 
 Once SPEC-004 is complete:
-- Search past conversations by topic/concept
-- "What did we decide about X?" actually works
-- Import months of Claude.ai history
-- Foundation for AI agents to remember past discussions
-- Complete the knowledge loop: Books + Conversations = Compounding context
+- Store any conversation with semantic search
+- "What did we discuss about chunking strategies?"
+- Import historical Claude.ai conversations
+- Build context for future AI interactions
+- Full conversation history alongside book knowledge
 
 ---
 
-## The Complete Library
+## Usage Examples (Post-Implementation)
 
-After this spec:
+```bash
+# Daily workflow: capture key exchanges manually
+python src/convo_cli.py exchange \
+  --user "Should we use 500 or 1000 token chunks?" \
+  --assistant "500 tokens with 50 token overlap balances context and granularity."
 
+# Later: find that conversation
+python src/convo_cli.py search "chunk size decision"
+
+# Import old Claude.ai history
+python src/convo_cli.py import ~/Downloads/claude-conversations.json
+
+# Get recent context for a new session
+python src/convo_cli.py recent --limit 20
 ```
-alexandria-core
-├── Books (SPEC-003)
-│   └── 17 technical PDFs → searchable chunks
-├── Conversations (SPEC-004)
-│   └── All Claude chats → searchable messages
-├── Embeddings (SPEC-002)
-│   └── Everything unified in semantic space
-└── Foundation (SPEC-001)
-    └── PostgreSQL + pgvector + Syncthing
-```
-
-You'll be able to ask:
-- "What did the LangChain book say about RAG?"
-- "What did we decide about the embedding architecture?"
-- "Find everything related to transformer attention mechanisms"
-
-And get answers that span books AND conversations.
 
 ---
 
-*"The library remembers every conversation. Knowledge compounds."*
+## Future Extensions (Not in Scope)
+
+- Automatic capture from Claude Code sessions
+- Real-time sync with Claude.ai
+- Conversation summarization via LLM
+- Integration with Clara for research context
+
+These would be separate specs. This spec provides the foundation.
+
+---
+
+*"The library remembers every conversation. Nothing is lost."*
