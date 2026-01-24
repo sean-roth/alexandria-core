@@ -361,7 +361,85 @@ FROM library.chunks GROUP BY document_id;
 [2026-01-24 22:14] - All 523 chunks pass testing
 [2026-01-24 22:15] - Cleaned up partial documents, batch ingestion restarted
 [2026-01-24 22:16] - SPEC-003 COMPLETE (with batch ingestion fixes)
+
+[2026-01-24 02:55] - Additional batch ingestion of 17 books
+[2026-01-24 03:10] - Discovered tiktoken <|endoftext|> issue in LLM books
+[2026-01-24 03:12] - Fixed: disallowed_special=() in tokenizer.encode()
+[2026-01-24 03:20] - Discovered code-dense chunks exceed 1500 char limit
+[2026-01-24 03:25] - Reduced MAX_EMBED_CHARS to 1200, still failures
+[2026-01-24 03:30] - Reduced to 1000, still failures on numeric arrays
+[2026-01-24 03:35] - Added retry logic with progressive truncation (1000→800→600)
+[2026-01-24 03:40] - ALL 18 BOOKS INGESTED SUCCESSFULLY (6,294 chunks)
 ```
+
+---
+
+## Issues Encountered (Continued)
+
+### Issue 7: tiktoken Special Tokens in LLM Books
+
+**Problem:** Books about LLMs/transformers contain literal `<|endoftext|>` text, causing tiktoken to crash:
+
+```
+Encountered text corresponding to disallowed special token '<|endoftext|>'
+```
+
+**Solution:** Pass `disallowed_special=()` to `tokenizer.encode()`:
+
+```python
+tokens = self.tokenizer.encode(text, disallowed_special=())
+```
+
+---
+
+### Issue 8: Code-Dense Chunks Exceed Token Limit
+
+**Problem:** Even at 1500 chars, code-heavy chunks (especially Python/JavaScript with embedding vectors shown as output) hit the 512 BERT token limit. Code tokenizes more densely than prose.
+
+**Investigation:**
+- 1500 chars works for prose (~4 chars/token)
+- Code fails at 1200-1500 chars (~2-3 chars/token)
+- Numeric arrays fail at 900-1000 chars (~1.5-2 chars/token)
+
+**Solution:** Added retry logic with progressive truncation:
+
+```python
+max_chars = self.MAX_EMBED_CHARS  # 1000
+while max_chars >= 500:
+    try:
+        truncated = clean_text[:max_chars]
+        embedding = self.embedding_service.generate_embedding(truncated)
+        break
+    except Exception as e:
+        if "500" in str(e) and max_chars > 500:
+            max_chars -= 200  # Try shorter
+        else:
+            raise
+```
+
+**Rationale:**
+- Starts at 1000 chars (safe for most content)
+- On failure, retries at 800, 600, 500 chars
+- First 500-1000 chars still capture semantic meaning
+- Full text preserved in database for retrieval
+
+---
+
+### Issue 9: Comprehensive Text Cleaning
+
+**Problem:** Various special characters and patterns caused Ollama 500 errors across different books.
+
+**Solution:** Extended `_clean_text_for_embedding()` with:
+
+1. **Control character removal**: `[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`
+2. **Special token stripping**: `<|endoftext|>`, `<|pad|>`, etc.
+3. **Extended Unicode normalization**: 50+ characters including:
+   - Various quote styles (guillemets, primes)
+   - Multiple space types (en, em, thin, hair, figure)
+   - Zero-width characters (ZWSP, ZWNJ, ZWJ)
+   - Mathematical symbols (arrows, ≤, ≥, ≠, ∞)
+   - Greek letters (common in ML: α, β, γ, θ, λ, σ)
+4. **Repeated character collapse**: `(.)\1{2,}` → `\1\1`
 
 ---
 
@@ -374,11 +452,31 @@ For future specs involving embeddings, consider:
 3. **Text preprocessing**: Include a standard text cleaning step that handles:
    - Consecutive dots (TOC formatting)
    - Unicode typography (smart quotes, em-dashes, etc.)
+   - Control characters and zero-width characters
+   - Special tokens (`<|endoftext|>`, etc.)
    - Whitespace normalization
-4. **Model context limits**: nomic-embed-text has a 512 BERT token limit (~1500 chars safe). Document embedding model limits prominently.
+4. **Model context limits**: nomic-embed-text has a 512 BERT token limit. Safe limits vary by content:
+   - Prose: ~1500 chars
+   - Code: ~1200 chars
+   - Dense numeric data: ~800 chars
+   - Recommend: 1000 chars base with retry logic
 5. **Error recovery**: Consider transaction rollback for atomic document ingestion
+6. **tiktoken configuration**: Always use `disallowed_special=()` when processing arbitrary text
 
 The spec architecture and approach were sound. These are operational details discovered through real-world batch processing.
+
+---
+
+## Final Library Status
+
+| Metric | Value |
+|--------|-------|
+| Total Documents | 18 |
+| Total Chunks | 6,294 |
+| Avg Chunks/Book | 350 |
+| Largest Book | 842 chunks (Hands-On ML with Scikit-Learn) |
+
+All 17 technical books + 1 test document successfully ingested and searchable.
 
 ---
 
