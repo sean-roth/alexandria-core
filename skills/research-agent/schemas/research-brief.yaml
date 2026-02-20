@@ -1,0 +1,201 @@
+# Research Brief Schema
+# 
+# This defines the format for research tasks given to agents.
+# Create one YAML file per research task.
+
+# Example usage:
+#   agent --brief briefs/legal-copyright.yaml --output /alexandria/queue/
+
+schema_version: "1.0"
+
+# =============================================================================
+# REQUIRED FIELDS
+# =============================================================================
+
+required:
+  task_id:
+    type: string
+    description: "Unique identifier for this research task"
+    pattern: "^[a-z0-9-]+$"
+    example: "legal-copyright-001"
+    
+  domain:
+    type: string
+    description: "Primary knowledge domain"
+    enum: [law, business, technology, science, finance, medicine, other]
+    example: "law"
+    
+  subdomain:
+    type: string
+    description: "Specific area within domain"
+    example: "intellectual-property"
+    
+  objective:
+    type: string
+    description: "What the agent should find. Be specific."
+    example: |
+      Find comprehensive, authoritative resources on U.S. copyright law
+      suitable for training an AI legal advisor. Focus on:
+      - Fair use doctrine and its application
+      - Copyright in digital/AI contexts
+      - Duration and ownership rules
+
+# =============================================================================
+# OPTIONAL FIELDS
+# =============================================================================
+
+optional:
+  priority_topics:
+    type: array
+    description: "Specific subtopics to prioritize"
+    items:
+      type: string
+    example:
+      - "fair use four-factor test"
+      - "DMCA safe harbors"
+      - "public domain determination"
+      
+  quality_criteria:
+    type: object
+    description: "Override default quality requirements"
+    properties:
+      require_open_access:
+        type: boolean
+        default: true
+      require_recent:
+        type: boolean
+        default: false
+      recent_threshold_years:
+        type: integer
+        default: 5
+      prefer_primary_sources:
+        type: boolean
+        default: true
+      acceptable_licenses:
+        type: array
+        default: ["public-domain", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nc-sa", "government"]
+        
+  scope:
+    type: object
+    description: "Boundaries for the research"
+    properties:
+      jurisdiction:
+        type: string
+        description: "Legal jurisdiction focus"
+        example: "united-states"
+      depth:
+        type: string
+        enum: [quick_scan, standard, comprehensive, exhaustive]
+        default: standard
+      max_sources:
+        type: integer
+        default: 20
+      max_full_ingests:
+        type: integer
+        description: "Limit on PDFs to download"
+        default: 10
+        
+  search_hints:
+    type: object
+    description: "Guidance for where to look"
+    properties:
+      start_with:
+        type: array
+        description: "URLs to check first"
+        items:
+          type: string
+      required_sources:
+        type: array
+        description: "Must include these if available"
+        items:
+          type: string
+      exclude_sources:
+        type: array
+        description: "Skip these even if found"
+        items:
+          type: string
+          
+  output_preferences:
+    type: object
+    properties:
+      prefer_full_ingest:
+        type: boolean
+        default: false
+        description: "Bias toward downloading vs referencing"
+      include_foreign_sources:
+        type: boolean
+        default: false
+      generate_reading_list:
+        type: boolean
+        default: true
+        
+  metadata:
+    type: object
+    description: "Information about this brief"
+    properties:
+      created_by:
+        type: string
+      created_at:
+        type: string
+        format: date-time
+      notes:
+        type: string
+
+# =============================================================================
+# EXAMPLE COMPLETE BRIEF
+# =============================================================================
+
+example_brief: |
+  task_id: legal-copyright-001
+  
+  domain: law
+  subdomain: intellectual-property
+  
+  objective: |
+    Find comprehensive, authoritative resources on U.S. copyright law
+    suitable for training an AI legal advisor (Clara). Prioritize:
+    - Foundational textbooks and casebooks
+    - Primary sources (actual statutes, key cases)
+    - Practical guides for creators and businesses
+    Focus on fair use, digital copyright, and public domain.
+  
+  priority_topics:
+    - fair use doctrine
+    - DMCA and safe harbors
+    - copyright duration and public domain
+    - work for hire
+    - AI and copyright (recent developments)
+  
+  quality_criteria:
+    require_open_access: true
+    prefer_primary_sources: true
+    acceptable_licenses:
+      - public-domain
+      - cc-by
+      - cc-by-sa
+      - cc-by-nc-sa
+      - government
+  
+  scope:
+    jurisdiction: united-states
+    depth: comprehensive
+    max_sources: 25
+    max_full_ingests: 15
+  
+  search_hints:
+    start_with:
+      - https://web.law.duke.edu/cspd/openip/
+      - https://www.copyrightbook.org/
+      - https://www.law.cornell.edu/uscode/text/17
+    required_sources:
+      - "Duke Open IP Casebook"
+      - "17 USC (Copyright Act)"
+  
+  output_preferences:
+    prefer_full_ingest: true
+    generate_reading_list: true
+  
+  metadata:
+    created_by: Sean
+    created_at: 2026-02-20T12:00:00Z
+    notes: "For Compel English copyright compliance and general legal knowledge"

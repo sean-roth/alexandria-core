@@ -1,0 +1,74 @@
+# Research Brief: U.S. Copyright Law
+# For Alexandria knowledge library
+
+task_id: legal-copyright-001
+
+domain: law
+subdomain: intellectual-property
+
+objective: |
+  Find comprehensive, authoritative resources on U.S. copyright law
+  suitable for training an AI legal advisor (Clara). Focus on:
+  
+  1. Foundational textbooks and casebooks that explain copyright doctrine
+  2. Primary sources (Copyright Act, key Supreme Court cases)
+  3. Practical guidance on fair use, licensing, and public domain
+  4. Recent developments in AI/ML and copyright
+  
+  Clara will use these to help Sean with:
+  - Compel English copyright compliance (using classic literature)
+  - Understanding IP for content creation
+  - General copyright literacy
+
+priority_topics:
+  - fair use doctrine and four-factor test
+  - public domain determination (when works become free)
+  - work for hire doctrine
+  - DMCA and safe harbors
+  - AI training and copyright (emerging area)
+  - educational use exceptions
+  - derivative works
+
+quality_criteria:
+  require_open_access: true
+  prefer_primary_sources: true
+  recent_threshold_years: 10  # Copyright law is relatively stable
+  acceptable_licenses:
+    - public-domain
+    - cc-by
+    - cc-by-sa
+    - cc-by-nc
+    - cc-by-nc-sa
+    - government
+
+scope:
+  jurisdiction: united-states
+  depth: comprehensive
+  max_sources: 25
+  max_full_ingests: 15
+
+search_hints:
+  start_with:
+    - https://web.law.duke.edu/cspd/openip/
+    - https://www.copyrightbook.org/
+    - https://www.law.cornell.edu/uscode/text/17
+    - https://www.copyright.gov/
+  required_sources:
+    - "Duke Open IP Casebook"
+    - "17 USC (Copyright Act full text)"
+    - "Copyright Office Circulars"
+  exclude_sources:
+    - general news articles about copyright lawsuits
+    - blog posts without legal credentials
+
+output_preferences:
+  prefer_full_ingest: true
+  generate_reading_list: true
+
+metadata:
+  created_by: Sean
+  created_at: 2026-02-20T12:00:00Z
+  notes: |
+    Primary use case: Compel English uses public domain literature.
+    Need to understand when works enter public domain, fair use for
+    educational apps, and any AI-specific copyright concerns.

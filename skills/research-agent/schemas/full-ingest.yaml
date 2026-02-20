@@ -1,0 +1,264 @@
+# Full Ingest Metadata Schema
+#
+# When a document is downloaded for full ingestion into Alexandria,
+# this metadata file accompanies it through the pipeline.
+
+schema_version: "1.0"
+
+# =============================================================================
+# REQUIRED FIELDS
+# =============================================================================
+
+required:
+  type:
+    const: "full_ingest"
+    
+  document:
+    type: object
+    required: [title, filename, source_url, downloaded_at]
+    properties:
+      title:
+        type: string
+        description: "Human-readable title"
+      filename:
+        type: string
+        description: "Actual filename of downloaded document"
+        pattern: "^[a-zA-Z0-9._-]+$"
+      format:
+        type: string
+        enum: [pdf, epub, html, txt, md]
+        default: pdf
+      source_url:
+        type: string
+        format: uri
+        description: "Where the document was downloaded from"
+      downloaded_at:
+        type: string
+        format: date-time
+      file_size_bytes:
+        type: integer
+      sha256:
+        type: string
+        description: "Hash for integrity verification"
+        
+  attribution:
+    type: object
+    required: [authors]
+    properties:
+      authors:
+        type: array
+        items:
+          type: string
+        minItems: 1
+      editors:
+        type: array
+        items:
+          type: string
+      publisher:
+        type: string
+      publication_date:
+        type: string
+        format: date
+      edition:
+        type: string
+      isbn:
+        type: string
+        
+  license:
+    type: object
+    required: [type]
+    properties:
+      type:
+        type: string
+        enum:
+          - public-domain
+          - cc-by
+          - cc-by-sa
+          - cc-by-nc
+          - cc-by-nc-sa
+          - cc-by-nd
+          - cc-by-nc-nd
+          - cc0
+          - government
+          - fair-use
+          - unknown
+      url:
+        type: string
+        format: uri
+        description: "Link to license text"
+      notes:
+        type: string
+        
+  classification:
+    type: object
+    required: [domain, subdomain]
+    properties:
+      domain:
+        type: string
+      subdomain:
+        type: string
+      tags:
+        type: array
+        items:
+          type: string
+      jurisdiction:
+        type: string
+        description: "For legal documents - which jurisdiction"
+
+# =============================================================================
+# OPTIONAL FIELDS
+# =============================================================================
+
+optional:
+  description:
+    type: string
+    description: "Brief description of the document's content and purpose"
+    maxLength: 2000
+    
+  table_of_contents:
+    type: array
+    description: "Chapter/section structure if extractable"
+    items:
+      type: object
+      properties:
+        title:
+          type: string
+        page:
+          type: integer
+        level:
+          type: integer
+          description: "Heading level (1=chapter, 2=section, etc.)"
+          
+  page_count:
+    type: integer
+    
+  word_count_estimate:
+    type: integer
+    
+  language:
+    type: string
+    default: "en"
+    
+  quality_signals:
+    type: object
+    properties:
+      peer_reviewed:
+        type: boolean
+      institution:
+        type: string
+        description: "Affiliated institution"
+      citation_count:
+        type: integer
+        description: "If known"
+      adoption_count:
+        type: integer
+        description: "For textbooks - known course adoptions"
+        
+  related_documents:
+    type: array
+    description: "Other documents this relates to"
+    items:
+      type: object
+      properties:
+        title:
+          type: string
+        relationship:
+          type: string
+          enum: [supersedes, supplements, companion, cites, cited_by]
+          
+  ingestion_hints:
+    type: object
+    description: "Guidance for the ingestion pipeline"
+    properties:
+      skip_pages:
+        type: array
+        items:
+          type: integer
+        description: "Pages to skip (e.g., blank pages, ads)"
+      chapter_markers:
+        type: array
+        items:
+          type: string
+        description: "Patterns that indicate chapter breaks"
+      priority:
+        type: string
+        enum: [high, normal, low]
+        default: normal
+        
+  research_brief_id:
+    type: string
+    description: "ID of the brief that found this document"
+    
+  agent_notes:
+    type: string
+    description: "Any notes from the research agent"
+
+# =============================================================================
+# EXAMPLE
+# =============================================================================
+
+example: |
+  type: full_ingest
+  
+  document:
+    title: "Open Intellectual Property Casebook"
+    filename: "duke-open-ip-casebook-2024.pdf"
+    format: pdf
+    source_url: https://web.law.duke.edu/cspd/openip/
+    downloaded_at: 2026-02-20T14:30:00Z
+    file_size_bytes: 15234567
+    sha256: a1b2c3d4e5f6...
+  
+  attribution:
+    authors:
+      - "James Boyle"
+      - "Jennifer Jenkins"
+    publisher: "Duke Center for the Study of the Public Domain"
+    publication_date: 2024-08-01
+    edition: "5th Edition"
+  
+  license:
+    type: cc-by-nc-sa
+    url: https://creativecommons.org/licenses/by-nc-sa/4.0/
+    notes: "Free for non-commercial use with attribution"
+  
+  classification:
+    domain: law
+    subdomain: intellectual-property
+    tags:
+      - copyright
+      - trademark
+      - patent
+      - trade-secret
+      - fair-use
+      - casebook
+    jurisdiction: united-states
+  
+  description: |
+    Comprehensive law school casebook covering all four areas of U.S. 
+    intellectual property law: copyright, trademark, patent, and trade 
+    secret. Includes cases, secondary readings, and practice problems.
+    Written by leading IP scholars at Duke Law.
+  
+  page_count: 847
+  word_count_estimate: 320000
+  language: en
+  
+  quality_signals:
+    peer_reviewed: true
+    institution: "Duke University School of Law"
+    adoption_count: 45
+  
+  related_documents:
+    - title: "IP Statutory Supplement"
+      relationship: companion
+  
+  ingestion_hints:
+    skip_pages: [1, 2, 847]  # Cover, blank, back cover
+    priority: high
+  
+  research_brief_id: legal-copyright-001
+  
+  agent_notes: |
+    Foundational resource for IP knowledge. High quality, well-organized,
+    CC licensed. Should be ingested with high priority.

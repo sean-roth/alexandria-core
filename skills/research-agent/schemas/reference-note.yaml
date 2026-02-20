@@ -1,0 +1,206 @@
+# Reference Note Schema
+#
+# Used when a source should be cited but not fully ingested.
+# Agent reads the source, extracts key information, and creates
+# this structured note for Clara to reference.
+
+schema_version: "1.0"
+
+# =============================================================================
+# REQUIRED FIELDS
+# =============================================================================
+
+required:
+  type:
+    const: "reference"
+    
+  source:
+    type: object
+    required: [title, url, accessed]
+    properties:
+      title:
+        type: string
+        description: "Title of the source"
+      author:
+        type: string
+        description: "Author(s) - person or organization"
+      publication:
+        type: string
+        description: "Where published (journal, website, etc.)"
+      date:
+        type: string
+        format: date
+        description: "Publication date"
+      url:
+        type: string
+        format: uri
+        description: "URL where source was accessed"
+      accessed:
+        type: string
+        format: date
+        description: "Date agent accessed this source"
+      doi:
+        type: string
+        description: "DOI if available"
+        
+  domain:
+    type: string
+    description: "Knowledge domain"
+    
+  subdomain:
+    type: string
+    description: "Specific area"
+    
+  summary:
+    type: string
+    description: "2-5 sentence summary of the source's content and significance"
+    minLength: 50
+    maxLength: 1000
+
+# =============================================================================
+# OPTIONAL FIELDS
+# =============================================================================
+
+optional:
+  tags:
+    type: array
+    items:
+      type: string
+    description: "Keywords for retrieval"
+    
+  key_points:
+    type: array
+    description: "Main arguments or findings (3-7 points)"
+    items:
+      type: string
+    minItems: 1
+    maxItems: 10
+    
+  notable_quotes:
+    type: array
+    description: "Direct quotes worth preserving (with attribution)"
+    items:
+      type: object
+      properties:
+        text:
+          type: string
+          maxLength: 500
+        page:
+          type: string
+          description: "Page number or section"
+        context:
+          type: string
+          description: "Brief context for the quote"
+    maxItems: 5
+    
+  related_to:
+    type: array
+    description: "Other sources in Alexandria this relates to"
+    items:
+      type: string
+      
+  methodology:
+    type: string
+    description: "For research papers - how the study was conducted"
+    
+  limitations:
+    type: string
+    description: "Known limitations, biases, or caveats"
+    
+  why_reference_only:
+    type: string
+    description: "Why this wasn't fully ingested"
+    enum:
+      - commentary_not_primary
+      - time_sensitive
+      - paywall
+      - login_required
+      - untrusted_domain
+      - duplicate_of_ingested
+      - brief_scope_limit
+      - low_relevance
+      
+  quality_assessment:
+    type: object
+    properties:
+      authority:
+        type: string
+        enum: [high, medium, low, unknown]
+      accuracy:
+        type: string  
+        enum: [verified, likely_accurate, uncertain, disputed]
+      currency:
+        type: string
+        enum: [current, somewhat_dated, outdated]
+      relevance:
+        type: string
+        enum: [highly_relevant, relevant, tangential]
+        
+  research_brief_id:
+    type: string
+    description: "ID of the brief that generated this note"
+
+# =============================================================================
+# EXAMPLE
+# =============================================================================
+
+example: |
+  type: reference
+  
+  source:
+    title: "Fair Use in the Age of AI: A Framework for Analysis"
+    author: "Jane Smith"
+    publication: "Harvard Law Review"
+    date: 2024-03-15
+    url: https://harvardlawreview.org/2024/03/fair-use-ai-framework
+    accessed: 2026-02-20
+    doi: 10.1234/hlr.2024.0315
+  
+  domain: law
+  subdomain: intellectual-property
+  
+  tags:
+    - copyright
+    - fair-use
+    - artificial-intelligence
+    - machine-learning
+    - transformative-use
+  
+  summary: |
+    Argues that AI training on copyrighted works should be analyzed under
+    a modified fair use framework that accounts for "computational 
+    transformation." Proposes that the key question is whether the model's
+    outputs compete with the training data's market, not whether the 
+    training process involved copying. Provides a detailed four-factor
+    analysis adapted for ML contexts.
+  
+  key_points:
+    - Current fair use doctrine is inadequate for ML training analysis
+    - Proposes "computational transformation" as a new analytical factor
+    - Distinguishes training-phase copying from output-phase infringement
+    - Cites Authors Guild v. Google as foundational precedent
+    - Argues market substitution should focus on output, not training data
+    - Recommends legislative clarification rather than pure judicial adaptation
+  
+  notable_quotes:
+    - text: "The transformation occurs not in the output, but in the abstraction of patterns from the corpus."
+      page: "1247"
+      context: "Defining computational transformation"
+    - text: "Market substitution analysis must consider whether the model competes with the training data's market, not merely whether it produces similar content."
+      page: "1289"
+      context: "Applying fourth fair use factor"
+  
+  related_to:
+    - "17 USC § 107 (full text in library)"
+    - "Authors Guild v. Google (full text in library)"
+    - "Duke Open IP Casebook - Fair Use chapter"
+  
+  why_reference_only: commentary_not_primary
+  
+  quality_assessment:
+    authority: high
+    accuracy: likely_accurate
+    currency: current
+    relevance: highly_relevant
+  
+  research_brief_id: legal-copyright-001

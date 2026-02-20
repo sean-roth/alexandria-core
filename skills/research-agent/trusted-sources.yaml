@@ -1,0 +1,271 @@
+# Trusted Sources for Alexandria Research Agents
+# 
+# default_action options:
+#   full_ingest    - Download and fully process
+#   reference_note - Read and summarize only, never download
+#   evaluate       - Use decision logic (check if textbook, primary source, etc.)
+#
+# Security note: Sources not in this list default to reference_note only.
+# Never download from unlisted domains.
+
+version: "1.0"
+updated: 2026-02-20
+
+# =============================================================================
+# GOVERNMENT SOURCES - Highly trusted, usually full ingest
+# =============================================================================
+
+government:
+  - pattern: "*.gov"
+    default_action: full_ingest
+    notes: "Federal government. Primary sources, official publications."
+    
+  - pattern: "*.state.*.us"
+    default_action: full_ingest
+    notes: "State government sites"
+    
+  - pattern: "*.ca.gov"
+    default_action: full_ingest
+    notes: "California state government"
+    
+  - pattern: "*.colorado.gov"
+    default_action: full_ingest  
+    notes: "Colorado state government"
+    
+  - pattern: "*.illinois.gov"
+    default_action: full_ingest
+    notes: "Illinois state government"
+    
+  - pattern: "leg.colorado.gov"
+    default_action: full_ingest
+    notes: "Colorado Legislature - statutes"
+    
+  - pattern: "ilga.gov"
+    default_action: full_ingest
+    notes: "Illinois General Assembly - statutes"
+    
+  - pattern: "chicago.gov"
+    default_action: full_ingest
+    notes: "City of Chicago - includes RLTO"
+    
+  - pattern: "cookcountyil.gov"
+    default_action: full_ingest
+    notes: "Cook County - includes RTLO"
+
+# =============================================================================
+# ACADEMIC INSTITUTIONS - Trusted but evaluate content type
+# =============================================================================
+
+academic:
+  - pattern: "*.edu"
+    default_action: evaluate
+    notes: "Universities. Evaluate: law reviews = note, casebooks = ingest"
+    
+  - pattern: "law.cornell.edu"
+    default_action: full_ingest
+    notes: "Legal Information Institute - primary sources"
+    
+  - pattern: "law.duke.edu"
+    default_action: full_ingest
+    notes: "Duke Law - includes open IP casebook"
+    
+  - pattern: "cyber.harvard.edu"
+    default_action: evaluate
+    notes: "Berkman Klein Center"
+    
+  - pattern: "opencasebook.org"
+    default_action: full_ingest
+    notes: "H2O Harvard - open casebooks"
+
+# =============================================================================
+# OPEN EDUCATIONAL RESOURCES - Full ingest by default
+# =============================================================================
+
+oer:
+  - pattern: "openstax.org"
+    default_action: full_ingest
+    notes: "OpenStax free textbooks - always high quality"
+    
+  - pattern: "cali.org"
+    default_action: full_ingest
+    notes: "CALI eLangdell - free law casebooks"
+    
+  - pattern: "open.umn.edu"
+    default_action: full_ingest
+    notes: "Open Textbook Library"
+    
+  - pattern: "saylordotorg.github.io"
+    default_action: full_ingest
+    notes: "Saylor Academy open textbooks"
+    
+  - pattern: "libretexts.org"
+    default_action: full_ingest
+    notes: "LibreTexts - open textbooks"
+    
+  - pattern: "oercommons.org"
+    default_action: evaluate
+    notes: "OER Commons - mixed quality, evaluate each"
+    
+  - pattern: "2012books.lardbucket.org"
+    default_action: full_ingest
+    notes: "Lardbucket/Saylor archived textbooks"
+    
+  - pattern: "batch.libretexts.org"
+    default_action: full_ingest
+    notes: "LibreTexts PDF downloads"
+
+# =============================================================================
+# LEGAL DATABASES - Trusted for legal content
+# =============================================================================
+
+legal:
+  - pattern: "law.justia.com"
+    default_action: full_ingest
+    notes: "Justia - statutes and case law"
+    
+  - pattern: "case.law"
+    default_action: full_ingest
+    notes: "Caselaw Access Project - Harvard"
+    
+  - pattern: "uscode.house.gov"
+    default_action: full_ingest
+    notes: "Official U.S. Code"
+    
+  - pattern: "ecfr.gov"
+    default_action: full_ingest
+    notes: "Electronic Code of Federal Regulations"
+    
+  - pattern: "copyrightbook.org"
+    default_action: full_ingest
+    notes: "NYU Copyright casebook - free"
+    
+  - pattern: "thepublicdomain.org"
+    default_action: full_ingest
+    notes: "Duke public domain resources"
+    
+  - pattern: "illinoislegalaid.org"
+    default_action: evaluate
+    notes: "Illinois Legal Aid - guides and forms"
+    
+  - pattern: "isba.org"
+    default_action: reference_note
+    notes: "IL State Bar - summaries, not primary"
+    
+  - pattern: "codelibrary.amlegal.com"
+    default_action: full_ingest
+    notes: "Municipal code library"
+
+# =============================================================================
+# ARCHIVES - Careful evaluation needed
+# =============================================================================
+
+archives:
+  - pattern: "archive.org"
+    default_action: evaluate
+    notes: "Internet Archive. Check original source. User uploads exist."
+    quality_check:
+      - "Is original source authoritative?"
+      - "Is this a preserved copy of a trusted source?"
+      - "Avoid random user uploads"
+      
+  - pattern: "web.archive.org"
+    default_action: evaluate
+    notes: "Wayback Machine - same caution as archive.org"
+
+# =============================================================================
+# NEWS & COMMENTARY - Reference notes only
+# =============================================================================
+
+news_commentary:
+  - pattern: "nytimes.com"
+    default_action: reference_note
+    notes: "News - cite don't ingest"
+    
+  - pattern: "washingtonpost.com"
+    default_action: reference_note
+    notes: "News - cite don't ingest"
+    
+  - pattern: "hbr.org"
+    default_action: reference_note
+    notes: "Harvard Business Review - commentary"
+    
+  - pattern: "harvardlawreview.org"
+    default_action: reference_note
+    notes: "Law review articles - commentary on law"
+    
+  - pattern: "stanfordlawreview.org"
+    default_action: reference_note
+    notes: "Law review articles - commentary"
+    
+  - pattern: "yalelawjournal.org"
+    default_action: reference_note
+    notes: "Law review articles - commentary"
+    
+  - pattern: "nolo.com"
+    default_action: reference_note
+    notes: "Legal guides - helpful but not primary"
+    
+  - pattern: "*.medium.com"
+    default_action: reference_note
+    notes: "Blog platform - variable quality"
+
+# =============================================================================
+# PROFESSIONAL ORGANIZATIONS - Usually reference notes
+# =============================================================================
+
+professional:
+  - pattern: "americanbar.org"
+    default_action: reference_note
+    notes: "ABA - professional guidance, not primary law"
+    
+  - pattern: "irs.gov"
+    default_action: full_ingest
+    notes: "IRS - publications are primary sources for tax"
+
+# =============================================================================
+# TECHNICAL RESOURCES - Evaluate based on content
+# =============================================================================
+
+technical:
+  - pattern: "arxiv.org"
+    default_action: evaluate
+    notes: "Preprints - foundational papers = ingest, incremental = note"
+    
+  - pattern: "github.com"
+    default_action: reference_note
+    notes: "Code repos - reference for documentation, don't ingest"
+    
+  - pattern: "docs.python.org"
+    default_action: full_ingest
+    notes: "Official Python docs - reference material"
+    
+  - pattern: "pytorch.org"
+    default_action: evaluate
+    notes: "PyTorch docs - evaluate depth needed"
+
+# =============================================================================
+# EXPLICITLY BLOCKED - Never access
+# =============================================================================
+
+blocked:
+  - pattern: "*.ru"
+    reason: "Security risk"
+    
+  - pattern: "sci-hub.*"
+    reason: "Copyright concerns"
+    
+  - pattern: "libgen.*"
+    reason: "Copyright concerns"
+    
+  - pattern: "z-lib.*"
+    reason: "Copyright concerns"
+
+# =============================================================================
+# DEFAULT BEHAVIOR
+# =============================================================================
+
+defaults:
+  unlisted_domain:
+    action: reference_note
+    notes: "Unknown domains get cited but never downloaded"
+    flag_for_review: true

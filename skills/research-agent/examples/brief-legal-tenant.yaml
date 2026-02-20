@@ -1,0 +1,89 @@
+# Research Brief: Tenant Rights (Chicago + Colorado)
+# For Alexandria knowledge library
+
+task_id: legal-tenant-chi-co-001
+
+domain: law
+subdomain: housing-tenant-rights
+
+objective: |
+  Find comprehensive resources on tenant rights and landlord-tenant law
+  for two jurisdictions:
+  
+  1. CHICAGO / ILLINOIS - Potential move destination
+     - Chicago RLTO (Residential Landlord Tenant Ordinance)
+     - Cook County RTLO (different from Chicago!)
+     - Illinois state landlord-tenant law
+     
+  2. COLORADO - Current residence, maintaining connections
+     - Colorado landlord-tenant statutes
+     - Security deposit laws
+     - Eviction procedures
+  
+  Clara needs to understand the differences between these jurisdictions
+  and provide accurate guidance specific to each location.
+
+priority_topics:
+  # Chicago/Illinois
+  - Chicago RLTO requirements and tenant protections
+  - Cook County RTLO (suburban Cook County)
+  - Illinois Security Deposit Return Act
+  - late fee limits
+  - landlord entry requirements
+  - repair and deduct rights
+  - lease termination notice requirements
+  - subletting rights
+  
+  # Colorado  
+  - Colorado security deposit law
+  - warranty of habitability
+  - eviction procedures
+  - lease requirements
+
+quality_criteria:
+  require_open_access: true
+  prefer_primary_sources: true
+  recent_threshold_years: 3  # Local ordinances can change
+  acceptable_licenses:
+    - government
+    - public-domain
+    - cc-by
+    - cc-by-sa
+
+scope:
+  jurisdiction: "chicago-il-co"  # Multi-jurisdiction
+  depth: comprehensive
+  max_sources: 20
+  max_full_ingests: 12
+
+search_hints:
+  start_with:
+    # Chicago
+    - https://www.chicago.gov/city/en/depts/doh/provdrs/landlords/svcs/residential-landlord-and-tenant-ordinance.html
+    - https://codelibrary.amlegal.com/codes/chicago/latest/chicago_il/0-0-0-2639041
+    - https://www.cookcountyil.gov/rtlo
+    # Illinois
+    - https://www.ilga.gov/legislation/ilcs/ilcs3.asp?ActID=2201
+    - https://illinoisattorneygeneral.gov/Page-Attachments/LandlordAndTenantRightsLaws.pdf
+    # Colorado
+    - https://leg.colorado.gov/colorado-revised-statutes
+  required_sources:
+    - "Chicago RLTO Summary (official city PDF)"
+    - "Chicago RLTO Full Ordinance Text"
+    - "Cook County RTLO"
+    - "Illinois Landlord and Tenant Act (765 ILCS 705)"
+    - "Colorado Revised Statutes Title 38 Article 12"
+
+output_preferences:
+  prefer_full_ingest: true
+  generate_reading_list: true
+
+metadata:
+  created_by: Sean
+  created_at: 2026-02-20T12:00:00Z
+  notes: |
+    Sean is considering moving to Chicago. Chicago has one of the strongest
+    tenant protection ordinances in the country - significantly different
+    from Illinois state law and from Colorado. Need to understand the
+    specifics of Chicago RLTO (city), Cook County RTLO (suburban), and
+    keep Colorado knowledge for existing connections there.

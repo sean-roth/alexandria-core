@@ -1,0 +1,73 @@
+# Research Brief: Self-Employment Tax Law
+# For Alexandria knowledge library
+
+task_id: legal-tax-selfemployment-001
+
+domain: law
+subdomain: taxation
+
+objective: |
+  Find authoritative resources on U.S. federal tax law for self-employed
+  individuals and small business owners. Clara will use these to help Sean:
+  
+  1. Understand tax obligations for SOPs Nobody Reads (consultancy)
+  2. Navigate Compel English business expenses and deductions
+  3. Handle quarterly estimated taxes
+  4. Maximize legitimate deductions (home office, equipment, etc.)
+  
+  Focus on IRS publications and official guidance rather than 
+  third-party interpretations.
+
+priority_topics:
+  - self-employment tax (Social Security/Medicare)
+  - Schedule C (Profit or Loss from Business)
+  - estimated quarterly tax payments
+  - home office deduction (Pub 587)
+  - business expense deductions (Pub 535)
+  - independent contractor vs employee (1099 vs W-2)
+  - business use of vehicle
+  - retirement accounts for self-employed (SEP-IRA, Solo 401k)
+  - state tax obligations (Colorado, Illinois)
+
+quality_criteria:
+  require_open_access: true
+  prefer_primary_sources: true
+  recent_threshold_years: 2  # Tax law changes frequently
+  acceptable_licenses:
+    - government
+    - public-domain
+
+scope:
+  jurisdiction: united-states
+  depth: comprehensive
+  max_sources: 20
+  max_full_ingests: 15
+
+search_hints:
+  start_with:
+    - https://www.irs.gov/businesses/small-businesses-self-employed
+    - https://www.irs.gov/pub/irs-pdf/p334.pdf
+    - https://www.irs.gov/pub/irs-pdf/p535.pdf
+    - https://www.irs.gov/pub/irs-pdf/p587.pdf
+  required_sources:
+    - "IRS Publication 334 (Tax Guide for Small Business)"
+    - "IRS Publication 535 (Business Expenses)"
+    - "IRS Publication 587 (Business Use of Home)"
+    - "Schedule C Instructions"
+    - "Schedule SE Instructions"
+  exclude_sources:
+    - TurboTax/H&R Block marketing content
+    - Outdated publications (pre-2024)
+
+output_preferences:
+  prefer_full_ingest: true  # IRS pubs are stable and authoritative
+  include_foreign_sources: false
+  generate_reading_list: true
+
+metadata:
+  created_by: Sean
+  created_at: 2026-02-20T12:00:00Z
+  notes: |
+    Sean runs two businesses: SOPs Nobody Reads (consultancy) and
+    Compel English (EdTech). Both are currently self-employment income.
+    May be moving from Colorado to Illinois - need both state contexts.
